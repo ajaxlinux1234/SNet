@@ -1,0 +1,12 @@
+{
+    "manifest_version": 2,
+    "name": "simple-net",
+    "description": "a chrome extension with vue-cli3",
+    "version": "0.0.1",
+    "devtools_page": "dev.html",
+    "permissions": [
+      "tabs"
+    ],
+    "content_security_policy": "script-src 'self' 'unsafe-eval'; object-src 'self'",
+    "web_accessible_resources": ["fonts/*"]
+}
