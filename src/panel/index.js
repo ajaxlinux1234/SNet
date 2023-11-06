@@ -13,7 +13,8 @@ import {
   Dialog,
   Tag,
   Switch,
-  Autocomplete
+  Autocomplete,
+  Upload
 } from 'element-ui';
 
 Vue.use(Table);
@@ -26,6 +27,7 @@ Vue.use(MenuItem);
 Vue.use(Dialog);
 Vue.use(Tag);
 Vue.use(Switch);
+Vue.use(Upload);
 
 new Vue({
   el: "#app",

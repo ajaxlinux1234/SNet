@@ -2,12 +2,30 @@
   <div class="box">
     <div class="list">
       <div class="option-box">
-        <el-input clearable @change="onFilter" size="small" class="input" placeholder="搜索请求和响应结果" v-model="filter" />
+        <el-input clearable @change="onFilter" @keyup.enter.native="onFilter" size="small" class="input" placeholder="搜索请求和响应结果" v-model="filter" />
         <el-button class="space" size="small" type="primary" @click="onClear">清空所有</el-button>
         <img @click="onOpen" class="space" src="../../static/setting.svg" />
       </div>
       <el-dialog custom-class="dialog" title="设置" :visible.sync="visible" append-to-body>
-        <el-switch active-text="开启名单缓存" inactive-text="关闭名单缓存"  @change="onSwitchLocalStore" v-model="localCache" />
+        <div class="url-map-box">
+          mock数据模式：<el-switch @change="onSwitchMockStatus" v-model="localCache" />
+          <div class="mock-option">
+            <el-upload
+              action=""
+              :http-request="onMockFileChange"
+              :show-file-list="false"
+              :file-list="fileList"
+             >
+              <el-button size="small" type="primary">上传mock数据</el-button>
+            </el-upload>
+            <el-button @click="downloadMockTpl" size="small" type="primary">下载mock数据模版</el-button>
+            <el-button v-if="fileList.length" @click="setShowJsonView" size="small" type="primary">预览mock数据</el-button>
+          </div>
+          <el-dialog :visible.sync="showJsonView" title="mock" append-to-body>
+            <div id="jsonEditor"></div>
+          </el-dialog>
+        </div>
+        名单缓存：<el-switch @change="onSwitchLocalStore" v-model="localCache" />
         <div class="select-item">
           URL关键词黑名单：
           <el-tag
@@ -102,6 +120,11 @@
           sort
         ></json-viewer>
     </div>
+    <use-proxy-xhr 
+      open-proxy
+      re-write-res200
+      :url-map="mockMap"
+    />
   </div>
 </template>
 
@@ -110,10 +133,19 @@
 /* eslint-disable no-console */
 import JsonViewer from "vue-json-viewer";
 import localforage from 'localforage'
+import useProxyXhr from "./use-proxy-xhr.vue";
+// import JSONEditor from '@json-editor/json-editor'
+/**
+ * @typedef {Object} State
+ * @property {number} [highlightTotal=0] 搜索结果中共有几个dom高亮
+ * @property {number} [highlightCurrent=0] 搜索结果高亮dom的索引
+ */
 export default {
   name: 'App',
   components: {
-    JsonViewer
+    JsonViewer,
+    useProxyXhr
+    // useProxyXhr
   },
   data() {
     return {
@@ -133,9 +165,19 @@ export default {
       urlAddVal: undefined,
       resAddVal: undefined,
       urlBlackList: [],
-      resTypeWhiteList: ['fetch'],
+      resTypeWhiteList: ['fetch', 'xhr'],
       localCache: false,
       domain: null, 
+      mockMap: {
+        test: {
+          data: []
+        }
+      },
+      isMockStatus: false,
+      showJsonView: false,
+      fileList: [],
+      highlightTotal: 0,
+      highlightCurrent: 0,
     };
   },
   watch: {
@@ -146,6 +188,7 @@ export default {
       this.onHighlight()
     }
   },
+  /**@type {State} */
   computed: {
     showRes () {
       return this.curData ? Object.keys(this.curData.res).length > 0 : false
@@ -165,6 +208,7 @@ export default {
     await this.updateFromLocal()
     chrome.devtools.network.onRequestFinished.addListener(this.dealReqRes);
   },
+  /** @type {State} */
   methods: {
     dealReqRes (reqRes) {
       reqRes.getContent((body) => {
@@ -194,16 +238,24 @@ export default {
               } catch (error) {
                 console.log('no action')
               }
+              if (!action) {
+                try {
+                  const {action: newAction, ...newReq } = JSON.parse(decodeURIComponent((request.postData.text|| '').split('data=')[1]))
+                  action = newAction
+                  req = newReq
+                } catch (error) {
+                  console.log(error)
+                }
+              }
               try {
                 res = JSON.parse(body)
               } catch (error) {
-                res = body
+                res = this.getStringJSON(body)
               }
             }
             if (this.urlBlackList.some(i => i === action)) {
               return
             }
-            console.log(reqRes)
             const obj = {
               res,
               req,
@@ -225,6 +277,15 @@ export default {
           }
         }
       });
+    },
+    getStringJSON(str) {
+      try {
+        const newStr = str.match(/\((.)*\)/g)[0]
+        const result = JSON.parse(newStr.replace(/\(|\)/g, ''))
+        return result
+      } catch (error) {
+        return str
+      }
     },
     getDomain () {
       return new Promise((resolve, reject) => {
@@ -250,6 +311,35 @@ export default {
       this.urlBlackList = store.urlBlackList
       this.resTypeWhiteList = store.resTypeWhiteList
     },
+    async onSwitchMockStatus () {
+      this.onSwitchMockStatus = !this.onSwitchMockStatus
+    },
+    async onMockFileChange (data) {
+      const file = data.file
+      const jsonData = await this.readFile(file)
+      this.mockMap = jsonData
+    },
+    async downloadMockTpl () {
+      const data = JSON.stringify({"api/test": { "data": []}}, undefined, 4);
+      const blob = new Blob([data], { type: "text/json" }),
+      a = document.createElement("a");
+      a.download = '模板文件.json';
+      a.href = window.URL.createObjectURL(blob);
+      a.dataset.downloadurl = ["text/json", a.download, a.href].join(":");
+      a.click()
+    },
+    setShowJsonView () {
+
+    },
+    readFile (file) {
+      return new Promise((resolve) => {
+        const reader = new FileReader()
+        reader.onload = (event) => {
+          resolve(JSON.parse(event.target.result))
+        }
+        reader.readAsText(file)
+      })
+    },
     async onSwitchLocalStore () {
       if (this.localCache) {
         await localforage.setItem(this.domain, {
@@ -261,6 +351,7 @@ export default {
       }
     },
     onFilter(arg){
+      console.log("🚀 ~ file: App.vue:333 ~ onFilter ~ arg:", arg)
       if (!arg) {
         this.tableData = this.totalData
       }
@@ -278,6 +369,12 @@ export default {
       this.activeIndex = index
     },
     getCoords(elem, other) {
+      if (!elem) {
+        return {
+          top: 0,
+          left: 0
+        }
+      }
       const box = elem.getBoundingClientRect();
 
       const docEl = document.documentElement;
@@ -312,14 +409,17 @@ export default {
           // })
           const highlightTags = box[0] ? [...box[0].querySelectorAll('.jv-item,.jv-key')].filter((i) => i.innerText.includes(this.filter)) : null
           if (highlightTags) {
+            this.highlightTotal = highlightTags.length
             highlightTags.forEach(i => {
               i.classList.add('highlight')
             })
-            const { top } = this.getCoords(highlightTags[0], box[0])
+            const num = this.highlightCurrent
+            const { top } = this.getCoords(highlightTags[num], box[0])
             box[0].scrollTo({
               top,
               behavior: 'smooth'
             })
+            this.highlightCurrent += 1
           }
         }, 500)
       })
@@ -461,5 +561,18 @@ export default {
 
 .dialog .el-dialog__body {
   padding-top: 0;
+}
+
+.url-map-box {
+  border-bottom: 1px solid rgba(153, 153, 153, .3);
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+}
+
+.mock-option {
+  display: flex;
+  margin: 10px 0;
+  width: 260px;
+  justify-content: space-between;
 }
 </style>
